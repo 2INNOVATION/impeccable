@@ -354,8 +354,8 @@ describe('live-browser source contracts', () => {
     assert.ok(badge);
     assert.match(
       badge,
-      /chip\(REMOVE_ELEMENT_ICON, REMOVE_ELEMENT_LABEL, REMOVE_BADGE_FILL, removeSelectedElement\)[\s\S]{0,160}if \(selectedElement && hasTextRows\(selectedElement\)\) \{[\s\S]{0,120}chip\(EDIT_COPY_ICON, EDIT_COPY_LABEL, ACCENT, enterEditingMode\)/,
-      'Remove renders for every selection, left of a pencil that only shows when there is copy to edit',
+      /if \(selectedElement && hasTextRows\(selectedElement\)\) \{[\s\S]{0,120}chip\(EDIT_COPY_ICON, EDIT_COPY_LABEL, ACCENT, enterEditingMode\)[\s\S]{0,40}\}[\s\S]{0,40}chip\(REMOVE_ELEMENT_ICON, REMOVE_ELEMENT_LABEL, REMOVE_BADGE_FILL, removeSelectedElement\)/,
+      'Remove renders last on every selection, after a pencil that only shows when there is copy to edit',
     );
     assert.doesNotMatch(SOURCE, /renderEditBadge\(hasTextRows\(selectedElement\) \? 'idle' : 'hidden'\)/, 'selections without text rows must still get the Remove badge');
     const remove = SOURCE.match(/async function removeSelectedElement\(\) \{[\s\S]*?\n  \}/)?.[0];
@@ -373,6 +373,10 @@ describe('live-browser source contracts', () => {
     assert.match(undo, /target\.removeAttribute\(REMOVED_ATTR\);/);
     const restore = SOURCE.match(/function restoreDiscardedManualEdits\(entries\) \{[\s\S]*?\n  \}/)?.[0];
     assert.match(restore, /if \(op\?\.removeElement === true\) \{ restoreRemovedElement\(op\); continue; \}/, 'Discard restores removed elements before the text-leaf path');
+    const keys = SOURCE.match(/function handleKeyDown\(e\) \{[\s\S]*?\n  \}/)?.[0];
+    assert.match(keys, /if \(isRemoveKey\(e\) && state === 'CONFIGURING' && selectedElement && configureKind !== 'insert'\) \{[\s\S]{0,120}removeSelectedElement\(\);/, 'Delete or Backspace removes the selected element');
+    assert.match(SOURCE, /function isRemoveKey\(e\) \{[\s\S]{0,200}!e\.metaKey && !e\.ctrlKey && !e\.altKey && !e\.shiftKey/, 'only an unmodified Delete or Backspace counts');
+    assert.match(SOURCE, /function shouldPassthroughElementNav\(deepActive, e\) \{[\s\S]{0,200}!isRemoveKey\(e\)\) return false;[\s\S]{0,160}if \(deepActive\.value\) return false;/, 'the key reaches the handler only from an empty prompt');
     const strip = SOURCE.match(/function stripManualEditRuntimeState\(root\) \{[\s\S]*?\n  \}/)?.[0];
     assert.match(strip, /root\.querySelectorAll\('\[' \+ REMOVED_ATTR \+ '\]'\)\) removed\.remove\(\);[\s\S]{0,40}root\.removeAttribute\(REMOVED_ATTR\);/, 'context clones drop removed descendants and the marker');
   });

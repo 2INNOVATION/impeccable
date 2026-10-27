@@ -5031,12 +5031,12 @@
         }
         return btn;
       };
-      // Remove sits left of the pencil. Every selection gets Remove; the
-      // pencil only shows when there is copy to edit.
-      editBadgeEl.appendChild(chip(REMOVE_ELEMENT_ICON, REMOVE_ELEMENT_LABEL, REMOVE_BADGE_FILL, removeSelectedElement));
+      // The pencil only shows when there is copy to edit; Remove is the last
+      // chip on every selection, the destructive action at the far end.
       if (selectedElement && hasTextRows(selectedElement)) {
         editBadgeEl.appendChild(chip(EDIT_COPY_ICON, EDIT_COPY_LABEL, ACCENT, enterEditingMode));
       }
+      editBadgeEl.appendChild(chip(REMOVE_ELEMENT_ICON, REMOVE_ELEMENT_LABEL, REMOVE_BADGE_FILL, removeSelectedElement));
     } else {
       // 'editing' - show Cancel + Save separated
       editBadgeEl.innerHTML = '';
@@ -8351,9 +8351,17 @@
     sendEvent({ type: 'prefetch', pageUrl: path });
   }
 
+  // Delete or Backspace with no modifier, the keyboard's way to the Remove
+  // badge. It only acts on an empty prompt, so clearing typed text never
+  // takes the element with it.
+  function isRemoveKey(e) {
+    return (e.key === 'Delete' || e.key === 'Backspace')
+      && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !isImeKeydown(e);
+  }
+
   function shouldPassthroughElementNav(deepActive, e) {
     if (!deepActive || !own(deepActive)) return false;
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && !isRemoveKey(e)) return false;
     if (!/^(INPUT|TEXTAREA)$/.test(deepActive.tagName || '')) return false;
     if (deepActive.value) return false;
     if (deepActive.id === PREFIX + '-input' && state === 'CONFIGURING') return true;
@@ -8422,6 +8430,13 @@
         else { hideHighlight(); setLiveState('IDLE'); }
         return;
       }
+    }
+
+    if (isRemoveKey(e) && state === 'CONFIGURING' && selectedElement && configureKind !== 'insert') {
+      e.preventDefault();
+      e.stopPropagation();
+      removeSelectedElement();
+      return;
     }
 
     // Arrow/Enter nav works in PICKING (hover) and CONFIGURING (selected, input empty)
