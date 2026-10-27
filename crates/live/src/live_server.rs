@@ -2206,13 +2206,28 @@ fn handle_manual_edit_route(
                 .map(String::from)
                 .filter(|r| !r.is_empty());
             // `ref` scopes the discard to one staged op on the page (the
-            // browser's Undo for a removal). It touches no apply transaction:
-            // the browser refuses Undo while an apply is in flight.
+            // browser's Undo for a removal). It never rolls a transaction
+            // back, so it refuses while an Apply owns the page's edits: a
+            // second tab could otherwise undo an op the agent is applying.
             if let (Some(pu), Some(r)) = (page_url.as_deref(), op_ref.as_deref()) {
+                let mut st = lock(shared);
+                if manual_apply::apply_in_flight(&st, pu) {
+                    drop(st);
+                    respond(
+                        stream,
+                        cors,
+                        json_res(
+                            409,
+                            json!({ "error": "manual_edit_apply_in_flight", "pageUrl": pu, "ref": r }),
+                        ),
+                    );
+                    return;
+                }
                 let (entries, discarded) =
                     match manual_buffer::remove_ops_by_ref(&cwd, &env, pu, r) {
                         Ok(v) => v,
                         Err(e) => {
+                            drop(st);
                             respond(
                                 stream,
                                 cors,
@@ -2227,7 +2242,6 @@ fn handle_manual_edit_route(
                 details.insert("ref".into(), json!(r));
                 details.insert("discarded".into(), json!(discarded));
                 details.insert("totalCount".into(), json!(total));
-                let mut st = lock(shared);
                 st.record_manual_edit_activity("manual_edit_discarded", details);
                 drop(st);
                 respond(

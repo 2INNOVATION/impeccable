@@ -371,8 +371,13 @@ describe('live-browser source contracts', () => {
     assert.ok(undo);
     assert.match(undo, /\/manual-edit-discard\?token=[\s\S]*?&ref=' \+ encodeURIComponent\(ref \|\| ''\)/, 'Undo discards only that op by ref, not the whole page');
     assert.match(undo, /target\.removeAttribute\(REMOVED_ATTR\);/);
+    assert.match(undo, /if \(res\.status === 409\) \{[\s\S]{0,260}return;/, 'Undo leaves the removal staged while an Apply owns the page');
+    assert.match(remove, /if \(!originalText\) \{[\s\S]{0,300}return;[\s\S]{0,20}\}/, 'an element nothing identifies in source is refused before staging');
+    const original = SOURCE.match(/function removalOriginalText\(el\) \{[\s\S]*?\n  \}/)?.[0];
+    assert.match(original, /if \(el\.id\) return el\.id;[\s\S]{0,160}if \(cls\) return cls;/, 'a class name is the last identifying fallback');
     const restore = SOURCE.match(/function restoreDiscardedManualEdits\(entries\) \{[\s\S]*?\n  \}/)?.[0];
     assert.match(restore, /if \(op\?\.removeElement === true\) \{ restoreRemovedElement\(op\); continue; \}/, 'Discard restores removed elements before the text-leaf path');
+    assert.match(restore, /op\?\.supersededOp \? \[op, op\.supersededOp\] : \[op\]/, 'Discard also restores the copy edit a removal superseded');
     const keys = SOURCE.match(/function handleKeyDown\(e\) \{[\s\S]*?\n  \}/)?.[0];
     assert.match(keys, /if \(isRemoveKey\(e\) && state === 'CONFIGURING' && selectedElement && configureKind !== 'insert'\) \{[\s\S]{0,120}removeSelectedElement\(\);/, 'Delete or Backspace removes the selected element');
     assert.match(SOURCE, /function isRemoveKey\(e\) \{[\s\S]{0,200}!e\.metaKey && !e\.ctrlKey && !e\.altKey && !e\.shiftKey/, 'only an unmodified Delete or Backspace counts');

@@ -3891,6 +3891,8 @@
       if (base) return base.slice(0, 200);
     }
     if (el.id) return el.id;
+    const cls = [...(el.classList || [])].find((c) => c.indexOf('impeccable-') !== 0);
+    if (cls) return cls;
     return normalizeManualContextText(el.textContent).slice(0, 200);
   }
 
@@ -3917,6 +3919,12 @@
     const parent = target.parentElement;
     const ref = documentRefForElement(target);
     const originalText = removalOriginalText(target);
+    if (!originalText) {
+      // Nothing to find it by in source, so the applier could neither locate
+      // nor verify the removal. Better to say so than to stage a dead op.
+      showToast('Nothing identifies this element in source; give it an id or class, or remove it in the editor.', 5000);
+      return;
+    }
     const op = {
       ref,
       tag: target.tagName.toLowerCase(),
@@ -3977,6 +3985,13 @@
           + '&ref=' + encodeURIComponent(ref || ''),
         { method: 'POST' },
       );
+      if (res.status === 409) {
+        // An Apply owns this page's edits (started from another tab, or
+        // before our dock caught up); the removal stays staged and hidden.
+        showToast('Apply is running; undo once it finishes', 4000);
+        fetchPendingCount();
+        return;
+      }
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const result = await res.json().catch(() => ({}));
       target.removeAttribute(REMOVED_ATTR);
@@ -4606,7 +4621,10 @@
   function restoreDiscardedManualEdits(entries) {
     let failures = 0;
     for (const entry of entries || []) {
-      for (const op of entry.ops || []) {
+      // A removal that superseded a copy edit carries it; a discard that
+      // drops both must restore the text as well as the element.
+      const ops = (entry.ops || []).flatMap((op) => (op?.supersededOp ? [op, op.supersededOp] : [op]));
+      for (const op of ops) {
         if (op?.removeElement === true) { restoreRemovedElement(op); continue; }
         if (restoreMixedTextNodeManualEdit(op)) continue;
         const el = findManualEditRestoreElement(op);

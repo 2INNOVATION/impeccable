@@ -125,6 +125,17 @@ pub fn stage_entry(cwd: &str, env: &Env, new_entry: &Value) -> Result<Buffer, St
                     _ => Value::Bool(false),
                 };
                 replaced.insert("deleted".into(), deleted);
+                // A removal that lands on an element with a staged copy edit
+                // supersedes it, but keeps it: undoing the removal puts the
+                // copy edit back, since the page still shows the edited text.
+                let removes = new_op.get("removeElement") == Some(&Value::Bool(true));
+                let existing_removes =
+                    existing_ops[i].get("removeElement") == Some(&Value::Bool(true));
+                if removes && !existing_removes {
+                    let mut kept = existing_ops[i].as_object().cloned().unwrap_or_default();
+                    kept.remove("supersededOp");
+                    replaced.insert("supersededOp".into(), Value::Object(kept));
+                }
                 let mut ops = existing_ops.clone();
                 ops[i] = Value::Object(replaced);
                 if let Some(obj) = existing.as_object_mut() {
@@ -214,9 +225,15 @@ pub fn remove_ops_by_ref(
             kept.push(entry);
             continue;
         }
-        let (gone, stay): (Vec<Value>, Vec<Value>) = ops_of(&entry)
+        let (gone, mut stay): (Vec<Value>, Vec<Value>) = ops_of(&entry)
             .into_iter()
             .partition(|op| op.get("ref").and_then(|r| r.as_str()) == Some(op_ref));
+        // The op a removal superseded comes back in its place.
+        for op in &gone {
+            if let Some(prior) = op.get("supersededOp").filter(|p| p.is_object()) {
+                stay.push(prior.clone());
+            }
+        }
         if !gone.is_empty() {
             count += gone.len();
             let mut snapshot = entry.as_object().cloned().unwrap_or_default();
@@ -328,6 +345,46 @@ mod tests {
 
         let (removed, n) = remove_ops_by_ref(&cwd, &env, "/", "nope").unwrap();
         assert_eq!((removed.len(), n), (0, 0));
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn a_removal_supersedes_a_staged_copy_edit_and_undo_restores_it() {
+        let cwd = scratch("supersede");
+        let env = Env::new();
+        stage_entry(
+            &cwd,
+            &env,
+            &json!({ "id": "e1", "pageUrl": "/", "element": {}, "ops": [
+                { "ref": "main>p", "tag": "p", "originalText": "A", "newText": "B" },
+            ] }),
+        )
+        .unwrap();
+        let buf = stage_entry(
+            &cwd,
+            &env,
+            &json!({ "id": "e2", "pageUrl": "/", "element": {}, "ops": [
+                { "ref": "main>p", "tag": "p", "originalText": "B", "deleted": true, "removeElement": true },
+            ] }),
+        )
+        .unwrap();
+        // Merged by ref into e1: one removal op that remembers the copy edit
+        // and keeps the copy edit's originalText (the source still says A).
+        assert_eq!(buf.entries.len(), 1);
+        let op = &buf.entries[0]["ops"][0];
+        assert_eq!(op["removeElement"], true);
+        assert_eq!(op["originalText"], "A");
+        assert_eq!(op["supersededOp"]["newText"], "B");
+
+        let (removed, n) = remove_ops_by_ref(&cwd, &env, "/", "main>p").unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(removed[0]["ops"][0]["removeElement"], true);
+        let buf = read_buffer(&cwd, &env);
+        assert_eq!(buf.entries.len(), 1);
+        let op = &buf.entries[0]["ops"][0];
+        assert_eq!(op.get("removeElement"), None);
+        assert_eq!(op["newText"], "B");
+        assert_eq!(op.get("supersededOp"), None);
         let _ = std::fs::remove_dir_all(&cwd);
     }
 }
