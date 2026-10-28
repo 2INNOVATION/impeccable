@@ -7,8 +7,9 @@ Claude-shaped events it already understands: ``transform_tool_result`` on ``writ
 everything else (UI-file filtering, ``hook.enabled``, dedupe between the two passes).
 
 It runs only where the impeccable skill is reachable: a ``.hermes/skills/impeccable`` above the
-edited file (or the session cwd), else the one in the Hermes home. Fail-open: any error,
-timeout or missing launcher leaves Hermes untouched.
+edited file in a project Hermes trusts (``hermes skills trust``, the gate Hermes itself puts on
+project skills), else the one in the Hermes home. Fail-open: any error, timeout or missing
+launcher leaves Hermes untouched.
 """
 
 from __future__ import annotations
@@ -37,12 +38,23 @@ def _hermes_home() -> str:
     return os.environ.get("HERMES_HOME") or os.path.join(os.path.expanduser("~"), ".hermes")
 
 
+def _project_trusted(root: str) -> bool:
+    """Hermes' own trust list for project skills; anything that cannot answer means no."""
+    try:
+        from pathlib import Path
+        from agent.skill_utils import is_project_root_trusted
+        return bool(is_project_root_trusted(Path(root)))
+    except Exception:
+        return False
+
+
 def _find_launcher(start: str) -> Optional[str]:
-    """Nearest project install above ``start`` wins, then the Hermes home install."""
+    """Nearest trusted project install above ``start`` wins, then the Hermes home install.
+    An untrusted clone's launcher never runs: it is repository code."""
     current = os.path.abspath(start)
     while True:
         candidate = os.path.join(current, ".hermes", _SKILL_SCRIPTS)
-        if os.path.isfile(candidate):
+        if os.path.isfile(candidate) and _project_trusted(current):
             return candidate
         parent = os.path.dirname(current)
         if parent == current:
@@ -52,12 +64,9 @@ def _find_launcher(start: str) -> Optional[str]:
     return home if os.path.isfile(home) else None
 
 
-def _run_hook(start: str, cwd: str, event: Dict[str, Any], timeout: int) -> Optional[Dict[str, Any]]:
+def _run_hook(launcher: Optional[str], cwd: str, event: Dict[str, Any], timeout: int) -> Optional[Dict[str, Any]]:
     """Run ``<launcher> hook`` with ``event`` on stdin; the parsed stdout object, or None."""
-    if _disabled():
-        return None
-    launcher = _find_launcher(start)
-    if launcher is None:
+    if launcher is None or _disabled():
         return None
     env = dict(os.environ, IMPECCABLE_HOOK_HARNESS="hermes")
     proc = subprocess.run(
@@ -110,6 +119,10 @@ def _with_findings(result: str, text: str) -> str:
 
 
 def _make_hooks(session_cwd: Callable[[], str]):
+    # The launcher each session last edited through, so its Stop pass reaches a project
+    # below the session cwd: the engine finds that project's cache by session id.
+    session_launchers: Dict[str, str] = {}
+
     def on_transform_tool_result(tool_name: str = "", args: Any = None, result: Any = None,
                                  session_id: Optional[str] = None, **_: Any) -> Optional[str]:
         """Add the per-edit findings to a successful write_file / patch result."""
@@ -123,7 +136,10 @@ def _make_hooks(session_cwd: Callable[[], str]):
             if session_id:
                 event["session_id"] = session_id
             try:
-                texts.append(_additional_context(_run_hook(os.path.dirname(path), cwd, event, _EDIT_TIMEOUT_S)))
+                launcher = _find_launcher(os.path.dirname(path))
+                if launcher and session_id:
+                    session_launchers[session_id] = launcher
+                texts.append(_additional_context(_run_hook(launcher, cwd, event, _EDIT_TIMEOUT_S)))
             except Exception as err:  # fail-open: a broken hook must never cost the user a write
                 logger.debug("impeccable-design-hook: edit hook skipped for %s: %s", path, err)
         text = "\n\n".join(t for t in texts if t)
@@ -138,7 +154,8 @@ def _make_hooks(session_cwd: Callable[[], str]):
             event: Dict[str, Any] = {"hook_event_name": "Stop", "cwd": cwd, "stop_hook_active": False}
             if session_id:
                 event["session_id"] = session_id
-            output = _run_hook(cwd, cwd, event, _STOP_TIMEOUT_S)
+            launcher = session_launchers.get(session_id or "") or _find_launcher(cwd)
+            output = _run_hook(launcher, cwd, event, _STOP_TIMEOUT_S)
         except Exception as err:  # fail-open: never trap the turn on a hook failure
             logger.debug("impeccable-design-hook: stop hook skipped: %s", err)
             return None

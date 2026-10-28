@@ -11,12 +11,13 @@ pub const PLUGIN_NAME: &str = "impeccable-design-hook";
 pub const PLUGIN_FILES: [&str; 2] = ["plugin.yaml", "__init__.py"];
 
 /// JS: hermesGlobalHome(home): honor $HERMES_HOME only when it sits under
-/// `home` (resolved against cwd like `path.resolve`).
+/// `home` (resolved against cwd like `path.resolve`, which emits the host
+/// separator).
 pub fn hermes_global_home(env: &Env, cwd: &str, home: &str) -> String {
     if let Some(env_home) = env.get("HERMES_HOME").filter(|v| !v.is_empty()) {
         let resolved_env = jsp::resolve(cwd, &[env_home]);
         let resolved_home = jsp::resolve(cwd, &[home]);
-        if resolved_env == resolved_home || resolved_env.starts_with(&format!("{resolved_home}/")) {
+        if resolved_env == resolved_home || resolved_env.starts_with(&format!("{resolved_home}{}", jsp::SEP)) {
             return resolved_env;
         }
     }

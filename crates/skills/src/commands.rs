@@ -437,14 +437,14 @@ fn choose_install_plan(sys: &Sys, prompt: &mut Prompt, io: &mut Io, project_root
     Ok(InstallPlan { targets: choice.targets, scope, install_root, hook_root: project_root.to_string(), explicit: choice.explicit })
 }
 
-/// Prints the providers whose hook was written, plus the one step Hermes
-/// leaves to the user (#1178), until the user has taken it.
-fn report_hook_targets(sys: &Sys, io: &mut Io, targets: &[&'static str]) {
-    if targets.is_empty() {
-        return;
+/// Prints the providers whose hook was written this run, plus the one step
+/// Hermes leaves to the user (#1178) whenever its hook was wanted and that
+/// step is still open, so a repeat install that writes nothing still says it.
+fn report_hook_targets(sys: &Sys, io: &mut Io, written: &[&'static str], wanted: &[&'static str]) {
+    if !written.is_empty() {
+        out(io, &format!("Installed hooks into: {}", written.join(", ")));
     }
-    out(io, &format!("Installed hooks into: {}", targets.join(", ")));
-    if targets.contains(&".hermes") && !hook_manifest::hermes_plugin_enabled(sys) {
+    if wanted.contains(&".hermes") && !hook_manifest::hermes_plugin_enabled(sys) {
         out(io, "Enable the Hermes plugin once: hermes plugins enable impeccable-design-hook (a running gateway reloads it; otherwise restart Hermes).");
     }
 }
@@ -683,7 +683,7 @@ fn install(flags: &[String], io: &mut Io) -> R<()> {
             } else {
                 Vec::new()
             };
-            report_hook_targets(&sys, io, &written_hook_targets);
+            report_hook_targets(&sys, io, &written_hook_targets, if want_hooks { &hook_targets } else { &[] });
             // A repeat user-scope install whose user hook is already current
             // never sends Claude through copy_provider_hooks, so the
             // duplicate-hook cleanup that function ends with runs here as well.
@@ -774,7 +774,7 @@ fn install(flags: &[String], io: &mut Io) -> R<()> {
     ));
     install_engine_binaries(&sys, io, &written);
     bundle::report_provider_agents(&sys, io, &agent_results);
-    report_hook_targets(&sys, io, &hook_targets);
+    report_hook_targets(&sys, io, &hook_targets, if want_hooks { &targets } else { &[] });
     out(io, "\nDone! Now type /impeccable init in your AI coding agent's chat (not in this terminal) to set up design context.\n");
     Ok(())
 }
@@ -873,7 +873,7 @@ fn update(flags: &[String], io: &mut Io) -> R<()> {
         }
     };
     if up_to_date {
-        let outcome: R<Vec<&'static str>> = (|| {
+        let outcome: R<(Vec<&'static str>, bool)> = (|| {
             // Repair any stale pre-launcher (`node .../hook.mjs`) manifest a v3
             // install left behind, regardless of hook consent (triage E8).
             repair_update_hook_manifests(&sys, &hook_root, &root, &copy_providers).map_err(Flow::Throw)?;
@@ -883,14 +883,14 @@ fn update(flags: &[String], io: &mut Io) -> R<()> {
             } else {
                 Vec::new()
             };
-            Ok(hook_targets)
+            Ok((hook_targets, want_hooks))
         })();
         util::rm_rf(&tmp_dir);
         return match outcome {
-            Ok(hook_targets) => {
+            Ok((hook_targets, want_hooks)) => {
                 let v = sys.get_skills_version(&root, scope);
                 out(io, &format!("Skills are up to date{}.", version_suffix(&v)));
-                report_hook_targets(&sys, io, &hook_targets);
+                report_hook_targets(&sys, io, &hook_targets, if want_hooks { &copy_providers } else { &[] });
                 out(io, "Nothing else to do.");
                 Err(Flow::Exit(0))
             }
@@ -941,7 +941,7 @@ fn update(flags: &[String], io: &mut Io) -> R<()> {
         let v = sys.get_skills_version(&root, scope);
         out(io, &format!("Updated {} skill(s){}.", refreshed.len(), to_version_suffix(&v)));
         install_engine_binaries(&sys, io, &refreshed);
-        report_hook_targets(&sys, io, &hook_targets);
+        report_hook_targets(&sys, io, &hook_targets, if want_hooks { &providers } else { &[] });
         out(io, "Done!\n");
         Ok(())
     })();

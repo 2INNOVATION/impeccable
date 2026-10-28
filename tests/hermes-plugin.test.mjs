@@ -19,7 +19,8 @@ const HAS_PYTHON = spawnSync('python3', ['--version']).status === 0;
 const SKIP = !HAS_PYTHON ? 'python3 not on PATH' : process.platform === 'win32' ? 'fake launcher is a sh script' : false;
 
 // Loads the plugin from its file path (the dir name is not importable), registers
-// it on a stub ctx, calls one hook with the given kwargs, and prints the result.
+// it on a stub ctx, runs any `before` calls, calls one hook with the given kwargs,
+// and prints the result.
 const DRIVER = `
 import importlib.util, json, sys
 spec = json.loads(sys.argv[1])
@@ -33,11 +34,23 @@ class Ctx:
     def session_cwd(self):
         return spec["cwd"]
 mod.register(Ctx())
+for name, kwargs in spec.get("before", []):
+    hooks[name](**kwargs)
 result = hooks[spec["hook"]](**spec["kwargs"]) if spec.get("hook") else None
 print(json.dumps({"registered": sorted(hooks), "result": result}))
 `;
 
+// Stands in for Hermes' agent.skill_utils: the roots in FAKE_TRUSTED are the
+// projects \`hermes skills trust\` approved.
+const FAKE_SKILL_UTILS = `import os
+from pathlib import Path
+def is_project_root_trusted(root):
+    trusted = [e for e in os.environ.get("FAKE_TRUSTED", "").split(os.pathsep) if e]
+    return Path(root).resolve() in {Path(e).resolve() for e in trusted}
+`;
+
 const FAKE_LAUNCHER = `#!/bin/sh
+printf '%s' "$0" > "$FAKE_RECORD/launcher.txt"
 cat > "$FAKE_RECORD/stdin.json"
 cat "$FAKE_RECORD/stdin.json" >> "$FAKE_RECORD/events.txt"
 echo >> "$FAKE_RECORD/events.txt"
@@ -51,16 +64,19 @@ let tmp;
 let project;
 let record;
 let emptyHome;
+let stubs;
 
-function call(hook, kwargs, { cwd = project, env = {} } = {}) {
-  for (const name of ['stdin.json', 'events.txt', 'env.txt', 'argv.txt']) fs.rmSync(path.join(record, name), { force: true });
-  const spec = JSON.stringify({ plugin: PLUGIN, cwd, hook, kwargs });
+function call(hook, kwargs, { cwd = project, env = {}, before = [] } = {}) {
+  for (const name of ['stdin.json', 'events.txt', 'env.txt', 'argv.txt', 'launcher.txt']) fs.rmSync(path.join(record, name), { force: true });
+  const spec = JSON.stringify({ plugin: PLUGIN, cwd, hook, kwargs, before });
   const res = spawnSync('python3', ['-c', DRIVER, spec], {
     encoding: 'utf8',
     env: {
       ...process.env,
       HERMES_HOME: emptyHome,
       FAKE_RECORD: record,
+      FAKE_TRUSTED: project,
+      PYTHONPATH: stubs,
       PYTHONDONTWRITEBYTECODE: '1',
       IMPECCABLE_HOOK_DISABLED: '',
       ...env,
@@ -72,6 +88,11 @@ function call(hook, kwargs, { cwd = project, env = {} } = {}) {
 
 function stdout(text) {
   fs.writeFileSync(path.join(record, 'stdout.txt'), text);
+}
+
+function launcherRan() {
+  const file = path.join(record, 'launcher.txt');
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
 }
 
 function spawned() {
@@ -94,7 +115,10 @@ describe('hermes design-hook plugin', { skip: SKIP }, () => {
     project = path.join(tmp, 'project');
     record = path.join(tmp, 'record');
     emptyHome = path.join(tmp, 'empty-home');
-    for (const dir of [path.join(project, 'src'), record, emptyHome]) fs.mkdirSync(dir, { recursive: true });
+    stubs = path.join(tmp, 'stubs');
+    for (const dir of [path.join(project, 'src'), record, emptyHome, path.join(stubs, 'agent')]) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(stubs, 'agent/__init__.py'), '');
+    fs.writeFileSync(path.join(stubs, 'agent/skill_utils.py'), FAKE_SKILL_UTILS);
     installLauncher(path.join(project, '.hermes'));
   });
 
@@ -217,5 +241,27 @@ describe('hermes design-hook plugin', { skip: SKIP }, () => {
     const out = call('transform_tool_result', { tool_name: 'write_file', args: { path: 'a.tsx' }, result: '{}' }, { cwd: outside, env: { HERMES_HOME: home } });
     assert.equal(out, '{"impeccable": "Gradient text in App.tsx"}');
     assert.equal(sentEvent().tool_input.file_path, path.join(outside, 'a.tsx'));
+  });
+
+  it('runs a project launcher only in a project Hermes trusts', () => {
+    stdout(POST);
+    const args = { tool_name: 'write_file', args: { path: 'src/App.tsx' }, result: '{}' };
+    call('transform_tool_result', args);
+    assert.equal(launcherRan(), path.join(project, '.hermes/skills/impeccable/scripts/impeccable'), 'trusted');
+    const home = path.join(tmp, 'hermes-home');
+    installLauncher(home);
+    call('transform_tool_result', args, { env: { FAKE_TRUSTED: '', HERMES_HOME: home } });
+    assert.equal(launcherRan(), path.join(home, 'skills/impeccable/scripts/impeccable'), 'untrusted falls back to the home launcher');
+    assert.equal(call('transform_tool_result', args, { env: { FAKE_TRUSTED: '' } }), null, 'untrusted, no home launcher');
+    assert.equal(spawned(), false);
+  });
+
+  it('pre_verify reuses the launcher the session edited through', () => {
+    stdout(JSON.stringify({ decision: 'block', reason: 'Deep pass: 1 finding' }));
+    const edit = ['transform_tool_result', { tool_name: 'write_file', args: { path: path.join(project, 'src/App.tsx') }, result: '{}', session_id: 's7' }];
+    const out = call('pre_verify', { session_id: 's7', attempt: 0, changed_paths: [] }, { cwd: tmp, before: [edit] });
+    assert.deepEqual(out, { decision: 'block', reason: 'Deep pass: 1 finding' });
+    assert.equal(launcherRan(), path.join(project, '.hermes/skills/impeccable/scripts/impeccable'));
+    assert.equal(sentEvent().cwd, tmp);
   });
 });
