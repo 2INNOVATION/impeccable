@@ -2777,9 +2777,9 @@ fn force_allowed(reason: Option<&str>) -> bool {
     // Match a direct attribution together with its quotation. A user mention
     // elsewhere in the reason cannot authorize a different speaker's words.
     static QUOTE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"(?i)(?:^|[.!?]\s+)(?:the\s+)?(?:user|paul)(?:\s+(?:said|says|wrote|replied|answered|confirmed|asked)\s*[:,]?|\s*:)\s*(?:"([^"]+)"|“([^”]+)”|'([^']+)'|‘([^’]+)’)"#).unwrap());
-    static DOWNGRADE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^\s*(please\s+)?(ignore|waive|relax|skip|drop|disregard|downgrade|retire|override|supersede) (the )?(approved )?(comp|mockup|fidelity|plate|region)\b|^\s*(the )?(comp|mockup|fidelity|plate|region)\b[^.!?;\n]{0,40}\b(is optional|is not required|does not need to match|doesn't need to match|need not match|can differ|can be skipped|is (now )?(stale|outdated|retired|obsolete|superseded)|should be considered (stale|outdated|retired|obsolete)|no longer (represents|applies|governs|is the reference)|was (only |just )?a reference)\b|^\s*(yes,?\s+)?(the )?(build|built page|page|site) (now )?(overrides?|supersedes?|replaces?) (the )?(approved )?(comp|mockup)\s*$").unwrap());
+    static DOWNGRADE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^\s*(please\s+)?(ignore|waive|relax|skip|drop|disregard|downgrade|retire|override|supersede) (the )?(approved )?(comp|mockup|fidelity|plate|region)\b|^\s*(the )?(comp|mockup|fidelity|plate|region)\b[^.!?;\n]{0,40}\b(is optional|is not required|does not need to match|doesn't need to match|need not match|can differ|can be skipped|is (now )?(stale|outdated|retired|obsolete|superseded)|should be considered (stale|outdated|retired|obsolete)|no longer (represents|applies|governs|is the reference)|was (only |just )?a reference\s*$)\b|^\s*(yes,?\s+)?(the )?(build|built page|page|site) (now )?(overrides?|supersedes?|replaces?) (the )?(approved )?(comp|mockup)\s*$").unwrap());
     QUOTE.captures_iter(reason.trim()).any(|capture| {
-        (1..=4).filter_map(|i| capture.get(i)).any(|q| q.as_str().split(['.', '!', '?', ';', '\n']).any(|sentence| DOWNGRADE.is_match(sentence.trim())))
+        (1..=4).filter_map(|i| capture.get(i)).any(|q| q.as_str().split(['.', '!', '?']).any(|sentence| DOWNGRADE.is_match(sentence.trim())))
     })
 
 }

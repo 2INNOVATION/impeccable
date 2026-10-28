@@ -445,6 +445,8 @@ fn force_accepts_the_users_words_downgrading_the_comp_and_its_refusal_shows_the_
         "The user said: \"The comp was never a reference.\"",
         "The user said: \"The build does not override the comp.\"",
         "The user said: \"The page replaces the comp crops with real plates.\"",
+        "The user said: \"Do not\nignore the comp.\"",
+        "The user said: \"The comp was a reference and still is; do not deviate from it.\"",
         "Please downgrade the comp. It no longer represents my vision for the site.",
     ] {
         assert!(!force_allowed(Some(reason)), "{reason}");
