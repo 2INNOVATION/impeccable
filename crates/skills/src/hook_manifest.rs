@@ -625,11 +625,11 @@ fn json_parse_message(e: &serde_json::Error) -> String {
 }
 
 /// JS: copyProviderHooks(bundleDir, root, providers, {force, skillRoot}).
-/// Returns the providers whose manifest was written (deduplicated, in order).
-pub fn copy_provider_hooks(sys: &crate::providers::Sys, bundle_dir: &str, root: &str, providers: &[&'static str], force: bool, skill_root: Option<&str>, project_root: Option<&str>) -> Result<Vec<&'static str>, String> {
+/// Returns the manifest paths written (deduplicated, in write order).
+pub fn copy_provider_hooks(sys: &crate::providers::Sys, bundle_dir: &str, root: &str, providers: &[&'static str], force: bool, skill_root: Option<&str>, project_root: Option<&str>) -> Result<Vec<String>, String> {
     let skill_root = skill_root.unwrap_or(root);
     let user_scope = sys.is_home_dir(skill_root);
-    let mut written: Vec<&'static str> = Vec::new();
+    let mut written: Vec<String> = Vec::new();
     for provider in providers {
         let manifest_root = if user_scope && *provider == ".claude" { skill_root } else { root };
         for artifact in hook_artifacts_for_install(bundle_dir, manifest_root, provider, user_scope) {
@@ -676,8 +676,8 @@ pub fn copy_provider_hooks(sys: &crate::providers::Sys, bundle_dir: &str, root: 
             util::mkdir_p(&jsp::dirname(&artifact.dest))?;
             // Atomic: in user scope this is the user's whole Claude settings file.
             impeccable_common::fsx::write_atomic(&artifact.dest, format!("{}\n", util::json_pretty(&next)).as_bytes()).map_err(|e| util::node_error("open", &artifact.dest, &e))?;
-            if !written.contains(provider) {
-                written.push(provider);
+            if !written.contains(&artifact.dest) {
+                written.push(artifact.dest.clone());
             }
         }
         if user_scope && *provider == ".claude" {

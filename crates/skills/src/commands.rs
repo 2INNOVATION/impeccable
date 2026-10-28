@@ -81,6 +81,11 @@ fn err(io: &mut Io, line: &str) {
     io.err(&format!("{line}\n"));
 }
 
+/// The manifest paths a hook install wrote, home-relative paths shown as `~/...`.
+fn hook_paths_line(sys: &Sys, dests: &[String]) -> String {
+    dests.iter().map(|d| sys.format_path_for_display(d)).collect::<Vec<_>>().join(", ")
+}
+
 // ─── help ────────────────────────────────────────────────────────────────────
 
 /// JS: showHelp()
@@ -672,7 +677,7 @@ fn install(flags: &[String], io: &mut Io) -> R<()> {
                 Vec::new()
             };
             if !written_hook_targets.is_empty() {
-                out(io, &format!("Installed hooks into: {}", written_hook_targets.join(", ")));
+                out(io, &format!("Installed hooks into: {}", hook_paths_line(&sys, &written_hook_targets)));
             }
             // A repeat user-scope install whose user hook is already current
             // never sends Claude through copy_provider_hooks, so the
@@ -732,7 +737,7 @@ fn install(flags: &[String], io: &mut Io) -> R<()> {
 
     sys.migrate_unprefix_impeccable(&install_root, scope_opt);
 
-    let outcome: Result<(Vec<String>, Vec<bundle::AgentResult>, Vec<&'static str>), String> = (|| {
+    let outcome: Result<(Vec<String>, Vec<bundle::AgentResult>, Vec<String>), String> = (|| {
         let written = bundle::copy_provider_skills(&sys, &bundle_dir, &install_root, &targets, scope_opt)?;
         let agents = bundle::copy_provider_agents(&sys, &bundle_dir, &install_root, &targets, scope_opt)?;
         bundle::copy_provider_commands(&sys, &bundle_dir, &install_root, &targets, scope_opt);
@@ -765,7 +770,7 @@ fn install(flags: &[String], io: &mut Io) -> R<()> {
     install_engine_binaries(&sys, io, &written);
     bundle::report_provider_agents(&sys, io, &agent_results);
     if !hook_targets.is_empty() {
-        out(io, &format!("Installed hooks into: {}", hook_targets.join(", ")));
+        out(io, &format!("Installed hooks into: {}", hook_paths_line(&sys, &hook_targets)));
     }
     out(io, "\nDone! Now type /impeccable init in your AI coding agent's chat (not in this terminal) to set up design context.\n");
     Ok(())
@@ -865,7 +870,7 @@ fn update(flags: &[String], io: &mut Io) -> R<()> {
         }
     };
     if up_to_date {
-        let outcome: R<Vec<&'static str>> = (|| {
+        let outcome: R<Vec<String>> = (|| {
             // Repair any stale pre-launcher (`node .../hook.mjs`) manifest a v3
             // install left behind, regardless of hook consent (triage E8).
             repair_update_hook_manifests(&sys, &hook_root, &root, &copy_providers).map_err(Flow::Throw)?;
@@ -883,7 +888,7 @@ fn update(flags: &[String], io: &mut Io) -> R<()> {
                 let v = sys.get_skills_version(&root, scope);
                 out(io, &format!("Skills are up to date{}.", version_suffix(&v)));
                 if !hook_targets.is_empty() {
-                    out(io, &format!("Installed hooks into: {}", hook_targets.join(", ")));
+                    out(io, &format!("Installed hooks into: {}", hook_paths_line(&sys, &hook_targets)));
                 }
                 out(io, "Nothing else to do.");
                 Err(Flow::Exit(0))
@@ -936,7 +941,7 @@ fn update(flags: &[String], io: &mut Io) -> R<()> {
         out(io, &format!("Updated {} skill(s){}.", refreshed.len(), to_version_suffix(&v)));
         install_engine_binaries(&sys, io, &refreshed);
         if !hook_targets.is_empty() {
-            out(io, &format!("Installed hooks into: {}", hook_targets.join(", ")));
+            out(io, &format!("Installed hooks into: {}", hook_paths_line(&sys, &hook_targets)));
         }
         out(io, "Done!\n");
         Ok(())
