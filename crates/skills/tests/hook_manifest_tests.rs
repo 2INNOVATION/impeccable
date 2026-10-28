@@ -727,7 +727,11 @@ fn user_scope_install_reports_each_manifest_path_it_wrote() {
     write(&jsp::join(&[&bundle, ".codex", "hooks.json"]), &claude_bundle_manifest().to_string());
     write(&jsp::join(&[&bundle, ".grok", "hooks", "impeccable.json"]), &claude_bundle_manifest().to_string());
     std::fs::create_dir_all(&project).unwrap();
-    let sys = sys_with_home(&home);
+    // Windows reads home from USERPROFILE, so set both for the scope check.
+    let mut env = HashMap::new();
+    env.insert("HOME".to_string(), home.clone());
+    env.insert("USERPROFILE".to_string(), home.clone());
+    let sys = Sys::new(env, home.clone());
 
     let written = copy_provider_hooks(&sys, &bundle, &project, &[".claude", ".agents", ".grok"], false, Some(&home), Some(&project)).unwrap();
 
