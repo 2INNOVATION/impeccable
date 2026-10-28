@@ -438,13 +438,14 @@ fn choose_install_plan(sys: &Sys, prompt: &mut Prompt, io: &mut Io, project_root
 }
 
 /// Prints the providers whose hook was written this run, plus the one step
-/// Hermes leaves to the user (#1178) whenever its hook was wanted and that
-/// step is still open, so a repeat install that writes nothing still says it.
+/// Hermes leaves to the user (#1178) whenever its hook was wanted and the
+/// plugin is installed but not enabled, so a repeat install that writes
+/// nothing still says it and a bundle without the plugin never does.
 fn report_hook_targets(sys: &Sys, io: &mut Io, written: &[&'static str], wanted: &[&'static str]) {
     if !written.is_empty() {
         out(io, &format!("Installed hooks into: {}", written.join(", ")));
     }
-    if wanted.contains(&".hermes") && !hook_manifest::hermes_plugin_enabled(sys) {
+    if wanted.contains(&".hermes") && hook_manifest::hermes_plugin_installed(sys) && !hook_manifest::hermes_plugin_enabled(sys) {
         out(io, "Enable the Hermes plugin once: hermes plugins enable impeccable-design-hook (a running gateway reloads it; otherwise restart Hermes).");
     }
 }

@@ -726,7 +726,7 @@ fn hermes_plugin_dir(sys: &Sys) -> String {
 }
 
 /// Both plugin files are present under Hermes' home.
-fn hermes_plugin_installed(sys: &Sys) -> bool {
+pub fn hermes_plugin_installed(sys: &Sys) -> bool {
     let dir = hermes_plugin_dir(sys);
     hermes::PLUGIN_FILES.iter().all(|f| util::exists(&jsp::join(&[&dir, f])))
 }

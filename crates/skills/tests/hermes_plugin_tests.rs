@@ -125,50 +125,76 @@ fn a_bundle_with_half_the_plugin_errors() {
     assert!(!installed(&f, &sys));
 }
 
-/// A repeat `install` writes nothing new, yet still names the enable step
-/// while the plugin is installed but not enabled, and drops it once enabled.
+/// Runs `install --providers=hermes` against a staged bundle zip, with or
+/// without the plugin, and returns its stdout.
 #[cfg(unix)]
-#[test]
-fn repeat_install_keeps_the_enable_step_until_it_is_taken() {
+fn run_hermes_install(f: &Fixture, with_plugin: bool) -> String {
     use std::io::Write as _;
-    let Some((os, arch)) = impeccable_skills::engine_binary::platform_tag() else { return };
-    let f = Fixture::new("remind");
+    let (os, arch) = impeccable_skills::engine_binary::platform_tag().expect("supported platform");
     std::fs::create_dir_all(Path::new(&f.project).join(".git")).unwrap();
-    let zip_path = f.root.join("bundle.zip");
+    let zip_path = f.root.join(if with_plugin { "bundle.zip" } else { "bundle-old.zip" });
     let mut zip = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
     let plain = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let exec = plain.unix_permissions(0o755);
-    for (name, body, opts) in [
+    let mut entries = vec![
         (".hermes/skills/impeccable/SKILL.md".to_string(), "---\nname: impeccable\n---\n", plain),
         (".hermes/skills/impeccable/scripts/impeccable".to_string(), "#!/bin/sh\nexit 0\n", exec),
         (".hermes/skills/impeccable/scripts/VERSION".to_string(), "9.9.9\n", plain),
         (format!(".hermes/skills/impeccable/scripts/bin/{os}-{arch}/impeccable"), "#!/bin/sh\nexit 0\n", exec),
-        (format!("{PLUGIN}/plugin.yaml"), "name: impeccable-design-hook\n", plain),
-        (format!("{PLUGIN}/__init__.py"), "def register(ctx):\n    pass\n", plain),
-    ] {
+    ];
+    if with_plugin {
+        entries.push((format!("{PLUGIN}/plugin.yaml"), "name: impeccable-design-hook\n", plain));
+        entries.push((format!("{PLUGIN}/__init__.py"), "def register(ctx):\n    pass\n", plain));
+    }
+    for (name, body, opts) in entries {
         zip.start_file(name, opts).unwrap();
         zip.write_all(body.as_bytes()).unwrap();
     }
     zip.finish().unwrap();
 
-    let run = || {
-        let mut env = HashMap::new();
-        env.insert("HOME".to_string(), f.home.clone());
-        env.insert("TMPDIR".to_string(), f.root.join("tmp").to_string_lossy().into_owned());
-        env.insert("IMPECCABLE_BUNDLE_PATH".to_string(), zip_path.to_string_lossy().into_owned());
-        std::fs::create_dir_all(f.root.join("tmp")).unwrap();
-        let (mut io, captured) = impeccable_common::Io::captured("", PathBuf::from(&f.project), env);
-        let args = ["install", "-y", "--providers=hermes", "--scope=project"].map(String::from);
-        let code = impeccable_skills::run(&args, &mut io);
-        let stdout = String::from_utf8_lossy(&captured.stdout.borrow()).into_owned();
-        assert_eq!(code, 0, "install failed:\n{stdout}\n{}", String::from_utf8_lossy(&captured.stderr.borrow()));
-        stdout
-    };
-    const STEP: &str = "hermes plugins enable impeccable-design-hook";
-    assert!(run().contains(STEP), "first install names the step");
-    let repeat = run();
+    let mut env = HashMap::new();
+    env.insert("HOME".to_string(), f.home.clone());
+    env.insert("TMPDIR".to_string(), f.root.join("tmp").to_string_lossy().into_owned());
+    env.insert("IMPECCABLE_BUNDLE_PATH".to_string(), zip_path.to_string_lossy().into_owned());
+    std::fs::create_dir_all(f.root.join("tmp")).unwrap();
+    let (mut io, captured) = impeccable_common::Io::captured("", PathBuf::from(&f.project), env);
+    let args = ["install", "-y", "--providers=hermes", "--scope=project"].map(String::from);
+    let code = impeccable_skills::run(&args, &mut io);
+    let stdout = String::from_utf8_lossy(&captured.stdout.borrow()).into_owned();
+    assert_eq!(code, 0, "install failed:\n{stdout}\n{}", String::from_utf8_lossy(&captured.stderr.borrow()));
+    stdout
+}
+
+#[cfg(unix)]
+const ENABLE_STEP: &str = "hermes plugins enable impeccable-design-hook";
+
+/// A repeat `install` writes nothing new, yet still names the enable step
+/// while the plugin is installed but not enabled, and drops it once enabled.
+#[cfg(unix)]
+#[test]
+fn repeat_install_keeps_the_enable_step_until_it_is_taken() {
+    if impeccable_skills::engine_binary::platform_tag().is_none() {
+        return;
+    }
+    let f = Fixture::new("remind");
+    assert!(run_hermes_install(&f, true).contains(ENABLE_STEP), "first install names the step");
+    let repeat = run_hermes_install(&f, true);
     assert!(!repeat.contains("Installed hooks into"), "{repeat}");
-    assert!(repeat.contains(STEP), "repeat install still names the step:\n{repeat}");
+    assert!(repeat.contains(ENABLE_STEP), "repeat install still names the step:\n{repeat}");
     std::fs::write(Path::new(&f.home).join(".hermes/config.yaml"), "plugins:\n  enabled:\n    - impeccable-design-hook\n  disabled: []\n").unwrap();
-    assert!(!run().contains(STEP), "an enabled plugin needs no reminder");
+    assert!(!run_hermes_install(&f, true).contains(ENABLE_STEP), "an enabled plugin needs no reminder");
+}
+
+/// A bundle from before the plugin installs the skill but no plugin, so there
+/// is nothing to enable and the step is never named.
+#[cfg(unix)]
+#[test]
+fn a_bundle_without_the_plugin_names_no_enable_step() {
+    if impeccable_skills::engine_binary::platform_tag().is_none() {
+        return;
+    }
+    let f = Fixture::new("noplugin");
+    let out = run_hermes_install(&f, false);
+    assert!(!out.contains(ENABLE_STEP), "{out}");
+    assert!(!run_hermes_install(&f, false).contains(ENABLE_STEP), "repeat install");
 }
