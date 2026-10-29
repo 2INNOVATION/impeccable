@@ -110,6 +110,14 @@ body{
 "#;
     let snippets = low_contrast_snippets(html, Path::new("/tmp/grid.html"));
     assert!(snippets.is_empty(), "{snippets:?}");
+    // Minified, the colour sits flush against the gradient.
+    let minified = html.replace(
+        "linear-gradient(0deg,  rgba(255,255,255,0.025) 1px, transparent 1px),\n    #0b0d10",
+        "rgb(11,13,16)linear-gradient(0deg,rgba(255,255,255,0.025) 1px,transparent 1px)",
+    );
+    assert_ne!(minified, html);
+    let snippets = low_contrast_snippets(&minified, Path::new("/tmp/grid.html"));
+    assert!(snippets.is_empty(), "{snippets:?}");
 }
 
 #[test]

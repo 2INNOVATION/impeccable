@@ -210,6 +210,34 @@ static ZERO_LENGTH_RE: Lazy<Regex> =
 static BORDER_SIDE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^border-(top|right|bottom|left)$").expect("BORDER_SIDE_RE"));
 
+/// One `background` layer with every gradient and `url()` call cut out to
+/// its closing paren, so a color written flush against one
+/// (`rgb(0,0,0)linear-gradient(...)`) survives.
+fn without_images(layer: &str) -> String {
+    let mut out = String::new();
+    let mut rest = layer;
+    while let Some(m) = BG_IMAGE_SPLIT_RE.find(rest) {
+        out.push_str(&rest[..m.start()]);
+        out.push(' ');
+        let mut depth = 1;
+        let mut end = rest.len();
+        for (i, b) in rest.bytes().enumerate().skip(m.end()) {
+            match b {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ => {}
+            }
+            if depth == 0 {
+                end = i + 1;
+                break;
+            }
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn box4(names: [&str; 4], vals: [String; 4]) -> Vec<Expanded> {
     let [a, b, c, d] = vals;
     vec![
@@ -236,16 +264,11 @@ pub fn expand_static_declaration(prop: &str, value: &str) -> Vec<Expanded> {
         if has_image {
             out.push(("backgroundImage".into(), v.to_string()));
         }
-        // The color lives in the final comma-separated layer, so the tokens
-        // of that layer that are not images are all that can name it.
+        // The color lives in the final comma-separated layer, so that layer
+        // with its images taken out is all that can name it.
         let color_text = if has_image {
             let layers = split_css_list(v);
-            let last = layers.last().map(String::as_str).unwrap_or(v);
-            let kept: Vec<String> = split_css_tokens(last)
-                .into_iter()
-                .filter(|t| !BG_IMAGE_SPLIT_RE.is_match(t))
-                .collect();
-            kept.join(" ")
+            without_images(layers.last().map(String::as_str).unwrap_or(v))
         } else {
             v.to_string()
         };
