@@ -118,6 +118,14 @@ body{
     assert_ne!(minified, html);
     let snippets = low_contrast_snippets(&minified, Path::new("/tmp/grid.html"));
     assert!(snippets.is_empty(), "{snippets:?}");
+    // A paren inside a quoted URL does not end the image or hide the colour.
+    for value in ["url('a(1.png') #000", "url('x)red.png') #000"] {
+        let color = impeccable_html::cascade::expand_static_declaration("background", value)
+            .into_iter()
+            .find(|(k, _)| k == "backgroundColor")
+            .map(|(_, v)| v);
+        assert_eq!(color.as_deref(), Some("#000"), "{value}");
+    }
 }
 
 #[test]

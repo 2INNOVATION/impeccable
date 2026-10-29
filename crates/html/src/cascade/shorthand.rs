@@ -212,7 +212,8 @@ static BORDER_SIDE_RE: Lazy<Regex> =
 
 /// One `background` layer with every gradient and `url()` call cut out to
 /// its closing paren, so a color written flush against one
-/// (`rgb(0,0,0)linear-gradient(...)`) survives.
+/// (`rgb(0,0,0)linear-gradient(...)`) survives. A paren inside a quoted
+/// URL is part of the URL.
 fn without_images(layer: &str) -> String {
     let mut out = String::new();
     let mut rest = layer;
@@ -220,11 +221,18 @@ fn without_images(layer: &str) -> String {
         out.push_str(&rest[..m.start()]);
         out.push(' ');
         let mut depth = 1;
+        let mut quote: Option<u8> = None;
+        let mut escaped = false;
         let mut end = rest.len();
         for (i, b) in rest.bytes().enumerate().skip(m.end()) {
-            match b {
-                b'(' => depth += 1,
-                b')' => depth -= 1,
+            match (quote, b) {
+                _ if escaped => escaped = false,
+                (_, b'\\') => escaped = true,
+                (Some(q), _) if b == q => quote = None,
+                (Some(_), _) => {}
+                (None, b'"' | b'\'') => quote = Some(b),
+                (None, b'(') => depth += 1,
+                (None, b')') => depth -= 1,
                 _ => {}
             }
             if depth == 0 {
