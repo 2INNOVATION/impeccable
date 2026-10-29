@@ -236,15 +236,20 @@ pub fn expand_static_declaration(prop: &str, value: &str) -> Vec<Expanded> {
         if has_image {
             out.push(("backgroundImage".into(), v.to_string()));
         }
-        let before_image: &str = if has_image {
-            match BG_IMAGE_SPLIT_RE.find(v) {
-                Some(m) => &v[..m.start()],
-                None => v,
-            }
+        // The color lives in the final comma-separated layer, so the tokens
+        // of that layer that are not images are all that can name it.
+        let color_text = if has_image {
+            let layers = split_css_list(v);
+            let last = layers.last().map(String::as_str).unwrap_or(v);
+            let kept: Vec<String> = split_css_tokens(last)
+                .into_iter()
+                .filter(|t| !BG_IMAGE_SPLIT_RE.is_match(t))
+                .collect();
+            kept.join(" ")
         } else {
-            v
+            v.to_string()
         };
-        let color = extract_static_color(if has_image { before_image } else { v });
+        let color = extract_static_color(&color_text);
         if !color.is_empty() {
             out.push(("backgroundColor".into(), color.clone()));
         }
